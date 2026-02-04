@@ -1,0 +1,8 @@
+# Set Alt+V shortcut for ClipMan GUI
+[org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/clipman]
+name='ClipMan'
+command='/usr/bin/clipman-gui'
+binding='<Alt>V'
+
+[org/gnome/settings-daemon/plugins/media-keys]
+custom-keybindings=['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/clipman/']

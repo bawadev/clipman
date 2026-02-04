@@ -5,3 +5,4 @@ screenshot.png usr/share/doc/clipman
 LICENSE usr/share/doc/clipman
 README.md usr/share/doc/clipman
 debian/clipman.1 usr/share/man/man1
+etc/dconf/db/local.d/clipman etc/dconf/db/local.d

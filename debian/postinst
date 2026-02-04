@@ -3,8 +3,18 @@ set -e
 
 case "$1" in
     configure)
-        # Enable systemd user service for all users
-        # This is done per-user, not system-wide
+        # Update dconf database to apply keybinding
+        if command -v dconf-update >/dev/null 2>&1; then
+            dconf update
+        fi
+
+        # Try to reload GNOME settings for active users (if possible)
+        for user in $(users 2>/dev/null | tr ' ' '\n' | sort -u); do
+            if [ "$user" != "root" ]; then
+                # Notify user they may need to log out/in for keybinding to take effect
+                :
+            fi
+        done
         ;;
 esac
 

@@ -27,7 +27,7 @@ sudo dpkg -i clipman_1.0.0_all.deb
 # Install dependencies if needed
 sudo apt-get install -f
 
-# The service will start automatically on next login
+# The Alt+V keyboard shortcut is pre-configured (may require log out/in to take effect)
 # To start immediately:
 systemctl --user start clipman.service
 ```
