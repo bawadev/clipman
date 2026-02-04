@@ -13,7 +13,10 @@ case "$1" in
         # Remove autostart file if it exists
         rm -f /etc/xdg/autostart/clipman.service || true
 
-        # Update dconf database after removing keybinding config
+        # Remove system-wide dconf keybinding file
+        rm -f /etc/dconf/db/local.d/clipman || true
+
+        # Update dconf database
         if command -v dconf-update >/dev/null 2>&1; then
             dconf update
         fi

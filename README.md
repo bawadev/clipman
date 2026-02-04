@@ -21,15 +21,35 @@ A simple, efficient clipboard manager for Linux (X11) with a GTK3 GUI.
 Download and install the latest `.deb` package:
 
 ```bash
+# Download latest release
+wget https://github.com/bawadev/clipman/releases/latest/download/clipman_1.0.0-1_all.deb
+
 # Install package
-sudo dpkg -i clipman_1.0.0_all.deb
+sudo dpkg -i clipman_1.0.0-1_all.deb
 
 # Install dependencies if needed
 sudo apt-get install -f
+```
 
-# The Alt+V keyboard shortcut is pre-configured (may require log out/in to take effect)
-# To start immediately:
-systemctl --user start clipman.service
+**After installation:**
+- Log out and log back in for the **Alt+V** keyboard shortcut to take effect
+- The daemon will auto-start on next login
+- To start immediately without logging out: `systemctl --user start clipman.service`
+
+### Keyboard Shortcut
+
+The **Alt+V** shortcut is pre-configured system-wide for GNOME users. It opens the clipboard picker GUI.
+
+**Note:** The shortcut requires a session restart (log out/in) to take effect after installation.
+
+**To change the shortcut:**
+1. Open Settings → Keyboard → View and Customize Shortcuts
+2. Go to Custom Shortcuts → ClipMan
+3. Click the shortcut and press your desired key combination
+
+**To set manually (if needed):**
+```bash
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/clipman/ binding "<Super>V"
 ```
 
 ### From Source
@@ -173,6 +193,18 @@ To change the shortcut, edit the GNOME settings:
 gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/clipman/ binding "<Alt>V"
 ```
 
+## Uninstallation
+
+```bash
+# Remove the package
+sudo apt remove clipman
+
+# For complete removal (including config files)
+sudo apt purge clipman
+```
+
+The keyboard shortcut will be automatically removed when you uninstall the package.
+
 ## Troubleshooting
 
 ### Daemon not running
@@ -203,6 +235,29 @@ systemctl --user stop clipman.service
 
 [Bawa](https://github.com/bawa/clipman)
 
+## Roadmap / TODO
+
+### Planned Features
+
+- [ ] **Customizable keyboard shortcut** - Config file or GUI setting to change the hotkey
+- [ ] **Wayland support** - Add support for Wayland display server
+- [ ] **Configuration file** - `~/.config/clipman/config.json` for user settings
+- [ ] **History size configuration** - Adjustable max history without editing source
+- [ ] **Image clipboard support** - Store and retrieve copied images
+- [ ] **Search by regex** - Advanced search patterns
+- [ ] **Export/Import history** - Backup and restore clipboard history
+- [ ] **Theme support** - Dark/light themes for GUI
+- [ ] **Snippet management** - Save frequently used text snippets
+- [ ] **Sync across devices** - Optional cloud sync for history
+
+### Known Limitations
+
+- Only works on X11 (Wayland not supported yet)
+- Keyboard shortcut only auto-configured for GNOME
+- Manual install requires setting up keybinding manually
+
 ## Contributing
 
 Contributions are welcome! Feel free to open issues or submit pull requests.
+
+See the [Roadmap](#roadmap--todo) for areas to contribute.
