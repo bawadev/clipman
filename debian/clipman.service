@@ -1,0 +1,13 @@
+[Unit]
+Description=ClipMan Clipboard Manager
+Documentation=file:///usr/share/doc/clipman/README.md
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/clipman run
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

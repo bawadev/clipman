@@ -1,0 +1,315 @@
+#!/usr/bin/python3
+"""
+ClipMan GUI Picker - A simple dialog for selecting clipboard history
+Uses GTK3 for better Linux integration
+"""
+
+import gi
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk, Gdk, GLib
+import json
+import subprocess
+from pathlib import Path
+
+HISTORY_FILE = Path.home() / ".config" / "clipman" / "history.json"
+
+
+def load_history():
+    """Load clipboard history from file."""
+    if HISTORY_FILE.exists():
+        try:
+            with open(HISTORY_FILE, "r") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return []
+    return []
+
+
+def save_history(history):
+    """Save clipboard history to file."""
+    HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(HISTORY_FILE, "w") as f:
+        json.dump(history, f, indent=2)
+
+
+def set_clipboard(text):
+    """Set clipboard content."""
+    try:
+        process = subprocess.Popen(
+            ["xclip", "-selection", "clipboard"],
+            stdin=subprocess.PIPE
+        )
+        process.communicate(input=text.encode())
+        return process.returncode == 0
+    except subprocess.SubprocessError:
+        return False
+
+
+def simulate_paste():
+    """Simulate Ctrl+V to paste."""
+    try:
+        subprocess.Popen(
+            ["xdotool", "key", "--delay", "50", "ctrl+v"],
+            start_new_session=True
+        )
+    except subprocess.SubprocessError:
+        pass
+
+
+class ClipManWindow(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="ClipMan")
+
+        self.history = []
+
+        # Window settings
+        self.set_default_size(420, 400)
+        self.set_position(Gtk.WindowPosition.CENTER)
+        self.set_keep_above(True)
+        self.set_urgency_hint(True)
+        self.set_type_hint(Gdk.WindowTypeHint.DIALOG)
+
+        # Handle escape key to close
+        self.connect("key-press-event", self.on_key_press)
+
+        # Main container
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        vbox.set_margin_start(10)
+        vbox.set_margin_end(10)
+        vbox.set_margin_top(10)
+        vbox.set_margin_bottom(10)
+        self.add(vbox)
+
+        # Search entry
+        self.search_entry = Gtk.SearchEntry()
+        self.search_entry.set_placeholder_text("Search clipboard history... (Right-click to pin)")
+        self.search_entry.connect("search-changed", self.on_search_changed)
+        vbox.pack_start(self.search_entry, False, False, 0)
+
+        # Scrolled window for the list
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_vexpand(True)
+        vbox.pack_start(scrolled, True, True, 0)
+
+        # List store: index, pin_icon, preview, full_text, is_pinned
+        self.liststore = Gtk.ListStore(int, str, str, str, bool)
+
+        # Filter for search
+        self.filter = self.liststore.filter_new()
+        self.filter.set_visible_func(self.filter_func)
+
+        # Tree view
+        self.treeview = Gtk.TreeView(model=self.filter)
+        self.treeview.set_headers_visible(False)
+        self.treeview.connect("row-activated", self.on_row_activated)
+        self.treeview.connect("button-press-event", self.on_button_press)
+
+        # Pin icon column
+        pin_renderer = Gtk.CellRendererText()
+        pin_column = Gtk.TreeViewColumn("Pin", pin_renderer, text=1)
+        pin_column.set_min_width(30)
+        pin_column.set_max_width(30)
+        self.treeview.append_column(pin_column)
+
+        # Content column
+        renderer = Gtk.CellRendererText()
+        renderer.set_property("ellipsize", 3)  # PANGO_ELLIPSIZE_END
+        column = Gtk.TreeViewColumn("Content", renderer, text=2)
+        self.treeview.append_column(column)
+
+        scrolled.add(self.treeview)
+
+        # Button box
+        button_box = Gtk.Box(spacing=6)
+        vbox.pack_start(button_box, False, False, 0)
+
+        # Pin button
+        self.pin_btn = Gtk.Button(label="📌 Pin")
+        self.pin_btn.connect("clicked", self.on_pin_clicked)
+        button_box.pack_start(self.pin_btn, False, False, 0)
+
+        # Select button
+        select_btn = Gtk.Button(label="Paste Selected")
+        select_btn.connect("clicked", self.on_select_clicked)
+        select_btn.get_style_context().add_class("suggested-action")
+        button_box.pack_end(select_btn, False, False, 0)
+
+        # Cancel button
+        cancel_btn = Gtk.Button(label="Cancel")
+        cancel_btn.connect("clicked", lambda x: self.close())
+        button_box.pack_end(cancel_btn, False, False, 0)
+
+        # Create context menu
+        self.context_menu = Gtk.Menu()
+        pin_item = Gtk.MenuItem(label="📌 Pin / Unpin")
+        pin_item.connect("activate", self.on_context_pin)
+        self.context_menu.append(pin_item)
+        delete_item = Gtk.MenuItem(label="🗑 Delete")
+        delete_item.connect("activate", self.on_context_delete)
+        self.context_menu.append(delete_item)
+        self.context_menu.show_all()
+
+        # Load history
+        self.reload_history()
+
+        # Focus search entry
+        self.search_entry.grab_focus()
+
+    def reload_history(self):
+        """Load history into the list store."""
+        self.liststore.clear()
+        self.history = load_history()
+
+        if not self.history:
+            self.liststore.append([0, "", "(No clipboard history)", "", False])
+            return
+
+        for i, entry in enumerate(self.history[:50]):  # Limit to 50 entries
+            text = entry.get("text", "")
+            pinned = entry.get("pinned", False)
+            pin_icon = "📌" if pinned else ""
+            # Create preview
+            preview = text[:100].replace("\n", "↵").replace("\t", "→")
+            if len(text) > 100:
+                preview += "..."
+            self.liststore.append([i, pin_icon, preview, text, pinned])
+
+    def filter_func(self, model, iter, data):
+        """Filter function for search."""
+        search_text = self.search_entry.get_text().lower()
+        if not search_text:
+            return True
+        full_text = model[iter][3].lower()
+        return search_text in full_text
+
+    def on_search_changed(self, entry):
+        """Handle search text change."""
+        self.filter.refilter()
+
+    def on_key_press(self, widget, event):
+        """Handle key press events."""
+        if event.keyval == Gdk.KEY_Escape:
+            self.close()
+            return True
+        elif event.keyval == Gdk.KEY_Return:
+            self.select_current()
+            return True
+        return False
+
+    def on_button_press(self, widget, event):
+        """Handle mouse button press for context menu."""
+        if event.button == 3:  # Right click
+            path_info = self.treeview.get_path_at_pos(int(event.x), int(event.y))
+            if path_info:
+                path, column, x, y = path_info
+                self.treeview.set_cursor(path, column, False)
+                self.context_menu.popup_at_pointer(event)
+            return True
+        return False
+
+    def on_row_activated(self, treeview, path, column):
+        """Handle double-click on row."""
+        self.select_current()
+
+    def on_select_clicked(self, button):
+        """Handle select button click."""
+        self.select_current()
+
+    def on_pin_clicked(self, button):
+        """Handle pin button click."""
+        self.toggle_pin_current()
+
+    def on_context_pin(self, menu_item):
+        """Handle pin from context menu."""
+        self.toggle_pin_current()
+
+    def on_context_delete(self, menu_item):
+        """Handle delete from context menu."""
+        self.delete_current()
+
+    def get_selected_index(self):
+        """Get the index of the currently selected item."""
+        selection = self.treeview.get_selection()
+        model, treeiter = selection.get_selected()
+        if treeiter is None:
+            return None
+        return model[treeiter][0]  # Return the original index
+
+    def toggle_pin_current(self):
+        """Toggle pin status of current item."""
+        index = self.get_selected_index()
+        if index is None or index >= len(self.history):
+            return
+
+        # Toggle pin status
+        entry = self.history[index]
+        was_pinned = entry.get("pinned", False)
+        entry["pinned"] = not was_pinned
+
+        # Reorder: pinned items first
+        pinned = [h for h in self.history if h.get("pinned")]
+        unpinned = [h for h in self.history if not h.get("pinned")]
+        self.history = pinned + unpinned
+
+        save_history(self.history)
+        self.reload_history()
+
+    def delete_current(self):
+        """Delete current item from history."""
+        index = self.get_selected_index()
+        if index is None or index >= len(self.history):
+            return
+
+        del self.history[index]
+        save_history(self.history)
+        self.reload_history()
+
+    def select_current(self):
+        """Select the current item, copy to clipboard, and paste."""
+        selection = self.treeview.get_selection()
+        model, treeiter = selection.get_selected()
+
+        if treeiter is None:
+            return
+
+        full_text = model[treeiter][3]
+        if full_text:
+            set_clipboard(full_text)
+            # Close window first, then paste after a short delay
+            self.hide()
+            GLib.timeout_add(100, self._paste_and_quit)
+        else:
+            self.close()
+
+    def _paste_and_quit(self):
+        """Paste and quit the application."""
+        simulate_paste()
+        GLib.timeout_add(100, Gtk.main_quit)
+        return False  # Don't repeat
+
+
+def main():
+    # Check for history
+    if not HISTORY_FILE.exists():
+        dialog = Gtk.MessageDialog(
+            message_type=Gtk.MessageType.WARNING,
+            buttons=Gtk.ButtonsType.OK,
+            text="No clipboard history found.\nMake sure clipman daemon is running."
+        )
+        dialog.run()
+        dialog.destroy()
+        return
+
+    win = ClipManWindow()
+    win.connect("destroy", Gtk.main_quit)
+    win.show_all()
+
+    # Ensure window is on top and focused
+    win.present()
+
+    Gtk.main()
+
+
+if __name__ == "__main__":
+    main()

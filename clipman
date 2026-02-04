@@ -1,0 +1,458 @@
+#!/usr/bin/env python3
+"""
+ClipMan - A simple clipboard manager for Linux (X11)
+"""
+
+import subprocess
+import json
+import os
+import sys
+import time
+import argparse
+import signal
+from pathlib import Path
+from datetime import datetime
+from hashlib import md5
+
+# Configuration
+CONFIG_DIR = Path.home() / ".config" / "clipman"
+HISTORY_FILE = CONFIG_DIR / "history.json"
+PID_FILE = CONFIG_DIR / "clipman.pid"
+MAX_HISTORY = 100
+POLL_INTERVAL = 0.5  # seconds
+
+
+def ensure_config_dir():
+    """Ensure the config directory exists."""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def load_history():
+    """Load clipboard history from file."""
+    if HISTORY_FILE.exists():
+        try:
+            with open(HISTORY_FILE, "r") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return []
+    return []
+
+
+def save_history(history):
+    """Save clipboard history to file."""
+    ensure_config_dir()
+    with open(HISTORY_FILE, "w") as f:
+        json.dump(history, f, indent=2)
+
+
+def get_clipboard():
+    """Get current clipboard content."""
+    try:
+        result = subprocess.run(
+            ["xclip", "-selection", "clipboard", "-o"],
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        if result.returncode == 0:
+            return result.stdout
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError):
+        pass
+    return None
+
+
+def set_clipboard(text):
+    """Set clipboard content."""
+    try:
+        process = subprocess.Popen(
+            ["xclip", "-selection", "clipboard"],
+            stdin=subprocess.PIPE
+        )
+        process.communicate(input=text.encode())
+        return process.returncode == 0
+    except subprocess.SubprocessError:
+        return False
+
+
+def add_to_history(text, history):
+    """Add text to history if it's new."""
+    if not text or not text.strip():
+        return False
+
+    # Create hash for deduplication
+    text_hash = md5(text.encode()).hexdigest()
+
+    # Check if already in history - keep pinned items, remove unpinned duplicates
+    existing_pinned = None
+    new_history = []
+    for h in history:
+        if h.get("hash") == text_hash:
+            if h.get("pinned"):
+                existing_pinned = h
+            # Skip unpinned duplicates
+        else:
+            new_history.append(h)
+    history[:] = new_history
+
+    # If it was pinned, just update timestamp and keep it pinned
+    if existing_pinned:
+        existing_pinned["timestamp"] = datetime.now().isoformat()
+        history.insert(0, existing_pinned)
+        return True
+
+    # Add new entry at the beginning (after pinned items)
+    entry = {
+        "text": text,
+        "hash": text_hash,
+        "timestamp": datetime.now().isoformat(),
+        "preview": text[:100].replace("\n", "↵") + ("..." if len(text) > 100 else ""),
+        "pinned": False
+    }
+
+    # Find position after pinned items
+    insert_pos = 0
+    for i, h in enumerate(history):
+        if h.get("pinned"):
+            insert_pos = i + 1
+        else:
+            break
+    history.insert(insert_pos, entry)
+
+    # Trim history - but keep all pinned items
+    pinned = [h for h in history if h.get("pinned")]
+    unpinned = [h for h in history if not h.get("pinned")]
+    max_unpinned = MAX_HISTORY - len(pinned)
+    if len(unpinned) > max_unpinned:
+        unpinned = unpinned[:max_unpinned]
+    history[:] = pinned + unpinned
+
+    return True
+
+
+def daemon_running():
+    """Check if daemon is already running."""
+    if PID_FILE.exists():
+        try:
+            pid = int(PID_FILE.read_text().strip())
+            os.kill(pid, 0)  # Check if process exists
+            return True
+        except (ValueError, OSError):
+            PID_FILE.unlink(missing_ok=True)
+    return False
+
+
+def start_daemon():
+    """Start the clipboard monitoring daemon."""
+    if daemon_running():
+        print("Daemon is already running.")
+        return
+
+    # Fork to background
+    pid = os.fork()
+    if pid > 0:
+        print(f"Daemon started with PID {pid}")
+        return
+
+    # Child process
+    os.setsid()
+
+    # Write PID file
+    ensure_config_dir()
+    PID_FILE.write_text(str(os.getpid()))
+
+    # Setup signal handlers
+    def cleanup(signum, frame):
+        PID_FILE.unlink(missing_ok=True)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, cleanup)
+    signal.signal(signal.SIGINT, cleanup)
+
+    # Load history
+    history = load_history()
+    last_content = get_clipboard()
+
+    print("ClipMan daemon started. Monitoring clipboard...")
+
+    while True:
+        try:
+            current = get_clipboard()
+            if current and current != last_content:
+                if add_to_history(current, history):
+                    save_history(history)
+                last_content = current
+            time.sleep(POLL_INTERVAL)
+        except Exception as e:
+            time.sleep(POLL_INTERVAL)
+
+
+def run_foreground():
+    """Run the daemon in foreground (for systemd)."""
+    if daemon_running():
+        print("Daemon is already running.")
+        return
+
+    # Write PID file
+    ensure_config_dir()
+    PID_FILE.write_text(str(os.getpid()))
+
+    # Setup signal handlers
+    def cleanup(signum, frame):
+        PID_FILE.unlink(missing_ok=True)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, cleanup)
+    signal.signal(signal.SIGINT, cleanup)
+
+    # Load history
+    history = load_history()
+    last_content = get_clipboard()
+
+    print("ClipMan daemon started (foreground). Monitoring clipboard...")
+
+    while True:
+        try:
+            current = get_clipboard()
+            if current and current != last_content:
+                if add_to_history(current, history):
+                    save_history(history)
+                last_content = current
+            time.sleep(POLL_INTERVAL)
+        except Exception as e:
+            time.sleep(POLL_INTERVAL)
+
+
+def stop_daemon():
+    """Stop the clipboard monitoring daemon."""
+    if not PID_FILE.exists():
+        print("Daemon is not running.")
+        return
+
+    try:
+        pid = int(PID_FILE.read_text().strip())
+        os.kill(pid, signal.SIGTERM)
+        print(f"Daemon (PID {pid}) stopped.")
+        PID_FILE.unlink(missing_ok=True)
+    except (ValueError, OSError) as e:
+        print(f"Error stopping daemon: {e}")
+        PID_FILE.unlink(missing_ok=True)
+
+
+def show_history(limit=20):
+    """Display clipboard history."""
+    history = load_history()
+    if not history:
+        print("No clipboard history.")
+        return
+
+    pinned_count = sum(1 for h in history if h.get("pinned"))
+    print(f"Clipboard History ({pinned_count} pinned, {len(history)} total):\n")
+    for i, entry in enumerate(history[:limit]):
+        timestamp = entry.get("timestamp", "Unknown")[:19].replace("T", " ")
+        preview = entry.get("preview", entry.get("text", "")[:50])
+        pin_icon = "📌" if entry.get("pinned") else "  "
+        print(f"  {pin_icon} [{i}] {timestamp} | {preview}")
+    print(f"\nCommands: 'clipman select N' to copy, 'clipman pin N' to pin/unpin")
+
+
+def select_entry(index):
+    """Select a history entry and copy to clipboard."""
+    history = load_history()
+    if not history:
+        print("No clipboard history.")
+        return
+
+    if index < 0 or index >= len(history):
+        print(f"Invalid index. Valid range: 0-{len(history)-1}")
+        return
+
+    text = history[index].get("text", "")
+    if set_clipboard(text):
+        print(f"Copied entry [{index}] to clipboard.")
+    else:
+        print("Failed to copy to clipboard.")
+
+
+def clear_history():
+    """Clear clipboard history (keeps pinned items)."""
+    history = load_history()
+    pinned = [h for h in history if h.get("pinned")]
+    save_history(pinned)
+    print(f"Clipboard history cleared. {len(pinned)} pinned items kept.")
+
+
+def pin_entry(index):
+    """Toggle pin status of a history entry."""
+    history = load_history()
+    if not history:
+        print("No clipboard history.")
+        return
+
+    if index < 0 or index >= len(history):
+        print(f"Invalid index. Valid range: 0-{len(history)-1}")
+        return
+
+    entry = history[index]
+    was_pinned = entry.get("pinned", False)
+    entry["pinned"] = not was_pinned
+
+    # Reorder: pinned items first
+    pinned = [h for h in history if h.get("pinned")]
+    unpinned = [h for h in history if not h.get("pinned")]
+    history[:] = pinned + unpinned
+
+    save_history(history)
+    action = "unpinned" if was_pinned else "pinned"
+    print(f"Entry [{index}] {action}.")
+
+
+def show_status():
+    """Show daemon status."""
+    if daemon_running():
+        pid = PID_FILE.read_text().strip()
+        print(f"Daemon is running (PID: {pid})")
+    else:
+        print("Daemon is not running")
+
+    history = load_history()
+    print(f"History entries: {len(history)}/{MAX_HISTORY}")
+    print(f"History file: {HISTORY_FILE}")
+
+
+def interactive_select():
+    """Interactive selection using rofi or fzf if available."""
+    history = load_history()
+    if not history:
+        print("No clipboard history.")
+        return
+
+    # Prepare entries
+    entries = []
+    for i, entry in enumerate(history):
+        preview = entry.get("preview", entry.get("text", "")[:80])
+        entries.append(f"{i}: {preview}")
+
+    # Try rofi first
+    try:
+        result = subprocess.run(
+            ["which", "rofi"],
+            capture_output=True
+        )
+        if result.returncode == 0:
+            input_text = "\n".join(entries)
+            result = subprocess.run(
+                ["rofi", "-dmenu", "-i", "-p", "ClipMan", "-format", "i"],
+                input=input_text,
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                index = int(result.stdout.strip())
+                select_entry(index)
+                return
+            return
+    except (subprocess.SubprocessError, ValueError):
+        pass
+
+    # Try fzf
+    try:
+        result = subprocess.run(
+            ["which", "fzf"],
+            capture_output=True
+        )
+        if result.returncode == 0:
+            input_text = "\n".join(entries)
+            result = subprocess.run(
+                ["fzf", "--prompt=ClipMan> "],
+                input=input_text,
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                line = result.stdout.strip()
+                index = int(line.split(":")[0])
+                select_entry(index)
+                return
+            return
+    except (subprocess.SubprocessError, ValueError):
+        pass
+
+    # Fallback to simple selection
+    show_history()
+    try:
+        choice = input("\nEnter number to select (or 'q' to quit): ")
+        if choice.lower() != 'q':
+            select_entry(int(choice))
+    except (ValueError, EOFError):
+        pass
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="ClipMan - A simple clipboard manager for Linux"
+    )
+    subparsers = parser.add_subparsers(dest="command", help="Commands")
+
+    # start command
+    subparsers.add_parser("start", help="Start the clipboard daemon")
+
+    # run command (foreground, for systemd)
+    subparsers.add_parser("run", help="Run daemon in foreground (for systemd)")
+
+    # stop command
+    subparsers.add_parser("stop", help="Stop the clipboard daemon")
+
+    # status command
+    subparsers.add_parser("status", help="Show daemon status")
+
+    # history command
+    history_parser = subparsers.add_parser("history", help="Show clipboard history")
+    history_parser.add_argument("-n", "--limit", type=int, default=20, help="Number of entries to show")
+
+    # select command
+    select_parser = subparsers.add_parser("select", help="Select a history entry")
+    select_parser.add_argument("index", type=int, help="Entry index to select")
+
+    # pin command
+    pin_parser = subparsers.add_parser("pin", help="Pin/unpin a history entry")
+    pin_parser.add_argument("index", type=int, help="Entry index to pin/unpin")
+
+    # pick command (interactive)
+    subparsers.add_parser("pick", help="Interactive selection (rofi/fzf/manual)")
+
+    # clear command
+    subparsers.add_parser("clear", help="Clear clipboard history")
+
+    # get command
+    subparsers.add_parser("get", help="Get current clipboard content")
+
+    args = parser.parse_args()
+
+    if args.command == "start":
+        start_daemon()
+    elif args.command == "run":
+        run_foreground()
+    elif args.command == "stop":
+        stop_daemon()
+    elif args.command == "status":
+        show_status()
+    elif args.command == "history":
+        show_history(args.limit)
+    elif args.command == "select":
+        select_entry(args.index)
+    elif args.command == "pin":
+        pin_entry(args.index)
+    elif args.command == "pick":
+        interactive_select()
+    elif args.command == "clear":
+        clear_history()
+    elif args.command == "get":
+        content = get_clipboard()
+        if content:
+            print(content)
+    else:
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()

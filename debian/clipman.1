@@ -1,0 +1,57 @@
+.TH CLIPMAN 1 "February 2025" "clipman 1.0.0" "User Commands"
+.SH NAME
+clipman \- Simple clipboard manager for Linux (X11)
+.SH SYNOPSIS
+\fBclipman\fR \fICOMMAND\fR [\fIOPTIONS\fR]
+.SH DESCRIPTION
+ClipMan is a lightweight clipboard manager for Linux X11. It runs in the
+background, monitoring clipboard changes and maintaining a persistent history
+of copied items.
+.SH COMMANDS
+.TP
+\fBstart\fR
+Start the clipboard daemon in the background.
+.TP
+\fBrun\fR
+Run the daemon in the foreground (for systemd).
+.TP
+\fBstop\fR
+Stop the clipboard daemon.
+.TP
+\fBstatus\fR
+Show daemon status and history count.
+.TP
+\fBhistory\fR [\fB\-n\fR \fINUM\fR]
+Show clipboard history. Default: 20 entries.
+.TP
+\fBselect\fR \fIINDEX\fR
+Copy a history entry to clipboard by index.
+.TP
+\fBpin\fR \fIINDEX\fR
+Toggle pin status of a history entry.
+.TP
+\fBpick\fR
+Interactive selection using rofi, fzf, or manual input.
+.TP
+\fBclear\fR
+Clear clipboard history (keeps pinned items).
+.TP
+\fBget\fR
+Print current clipboard content.
+.SH FILES
+.TP
+.I ~/.config/clipman/history.json
+Clipboard history storage.
+.TP
+.I ~/.config/clipman/clipman.pid
+Daemon PID file.
+.SH GUI
+The clipboard picker GUI can be launched with the \fBclipman-gui\fR command.
+It provides a searchable list of clipboard entries with support for pinning
+and deleting items.
+.TP
+Bind Alt+V (or your preferred shortcut) to \fBclipman-gui\fR for quick access.
+.SH "SEE ALSO"
+\fBclipman-gui\fR(1), \fBxclip\fR(1)
+.SH AUTHOR
+Bawa <https://github.com/bawa/clipman>

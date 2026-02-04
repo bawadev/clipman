@@ -1,0 +1,33 @@
+# Build artifacts
+*.deb
+*.changes
+*.buildinfo
+*.dsc
+*.tar.gz
+debian/clipman/
+debian/.debhelper/
+debian/debhelper-build-stamp
+debian/files
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db

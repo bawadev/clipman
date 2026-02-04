@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=ClipMan
+Comment=Clipboard Manager
+Exec=/usr/bin/clipman-gui
+Icon=edit-paste
+Terminal=false
+Categories=Utility;GTK;
+Keywords=clipboard;history;copy;paste;
+StartupNotify=true

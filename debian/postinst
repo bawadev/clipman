@@ -1,0 +1,13 @@
+#!/bin/bash
+set -e
+
+case "$1" in
+    configure)
+        # Enable systemd user service for all users
+        # This is done per-user, not system-wide
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

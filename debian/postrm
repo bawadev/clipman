@@ -1,0 +1,20 @@
+#!/bin/bash
+set -e
+
+case "$1" in
+    remove|purge)
+        # Stop and disable the service for the current user if running
+        if systemctl --user is-active clipman.service >/dev/null 2>&1; then
+            systemctl --user stop clipman.service || true
+        fi
+        if systemctl --user is-enabled clipman.service >/dev/null 2>&1; then
+            systemctl --user disable clipman.service || true
+        fi
+        # Remove autostart file if it exists
+        rm -f /etc/xdg/autostart/clipman.service || true
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

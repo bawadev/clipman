@@ -1,0 +1,7 @@
+clipman usr/bin
+clipman-gui usr/bin
+clipman.desktop usr/share/applications
+screenshot.png usr/share/doc/clipman
+LICENSE usr/share/doc/clipman
+README.md usr/share/doc/clipman
+debian/clipman.1 usr/share/man/man1
